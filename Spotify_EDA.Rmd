@@ -1,0 +1,877 @@
+---
+title: "Analysis of Songs on Spotify"
+subtitle: "CS544 Term Project - Fall 2021"
+author: "Rohan J Aditya, Vignesh Sankaradas"
+date: "December 6, 2021"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: yes
+      smooth_scroll: true
+  pdf_document:
+    toc: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo=TRUE, warning=FALSE, message=FALSE) 
+```
+
+## Introduction
+
+Spotify is a Swedish audio streaming service founded on 23 April 2006. Its the world's largest music streaming service with over 381 million active users. 
+
+This project aims to visualize the differences in the attributes of 15 song genres.
+
+## Data Set Overview
+
+```{r, message=FALSE}
+library(ggplot2)
+library(plotly)
+library(sampling)
+library(reshape2)
+library(tidyverse)
+library(stringr)
+library(DT)
+library(knitr)
+library(rmarkdown)
+
+spotify = read.csv("genres_v2.csv")
+
+datatable(spotify[,c(19,c(1:18),c(20:22))], 
+          extensions = 'Responsive',
+          rownames = FALSE)
+```
+
+This data set contains 42305 songs from Spotify. The descriptions of some of the features are given below.
+
+**Acousticness**: A confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0 represents high confidence the track is acoustic.<br />
+**Danceability**: Describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is the most danceable.<br />
+**Duration_ms**: The duration of the track in milliseconds<br />
+**Energy**: Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy.<br />
+**Genre**: The genre of the track.<br />
+**Instrumentalness**: predicts whether a track contains no vocals. The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.<br />
+**Key**: Numerical, the estimated overall key of the track. Integers map to pitches using standard Pitch Class notation.<br />
+**Liveness**: Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides a strong likelihood that the track is live.<br />
+**Loudness**: Overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing the relative loudness of tracks.<br />
+**Mode**: Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived. Major is represented by 1 and minor is 0.<br />
+**Speechiness**: Detects the presence of spoken words in a track. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered. Values below 0.33 most likely represent music and other non-speech-like tracks.<br />
+**Tempo**: Overall estimated tempo of a track in beats per minute (BPM).<br />
+**Valence**: Measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive.
+
+## Data Preparation and Cleaning
+
+Features of the Spotify data frame:
+```{r,echo=FALSE}
+colnames(spotify)
+```
+
+The columns named *type*, *id*, *uri*, *track_href*, *analysis_url*, *Unnamed..0*, and *title* contain values that are not relevant to this project. Hence, they are dropped.
+
+A new column named *duration_min* is created which converts the duration of the song in milliseconds to minutes for better readability.
+
+A new data frame is created which contains all the numerical columns of the original data set.
+
+```{r, message=FALSE}
+spotify = spotify[,c(1:11, 17:20)]
+
+spotify$duration_min = spotify$duration_ms/(60*1000)
+spotify = spotify %>% arrange(genre)
+
+num_cols = unlist(lapply(spotify, is.numeric))
+spotify_num = spotify[ , num_cols]
+```
+
+## Goals of the Analysis
+
+1. To understand the parameters used by Spotify to analyze songs
+2. To examine the correlation between song attributes
+3. To discover the genres with the most and least number of songs
+4. To examine the distribution of track duration, loudness, speechiness, tempo, and valence
+5. To find the top 5 genres based on the average duration, loudness, tempo, speechiness, and valence
+6. To observe the number of songs with different values of the categorical feature *mode* for each genre
+7. To observe the distribution of track duration obtained from different sampling methods
+8. To examine whether the central limit theorem holds for different sample sizes
+
+## Feature Distribution {#feat_dist}
+
+The histogram shows the distribution of all numeric parameters in the Spotify data set. 
+
+```{r,message=FALSE, fig.height=9, fig.width=12}
+histcolors = c('#00429d', '#3963ab', '#5786b5', '#72abb9', 
+               '#89d2b0', '#95ff41', '#c7c94f', '#d89453', 
+               '#d45f51', '#bd2a48', '#93003a')
+
+histlines = c('#002a7f', '#2b478c', '#436595', '#578599', 
+              '#68a794', '#63d000', '#9ea22a', '#b07434', 
+              '#ab4734', '#961d2e', '#720022')
+
+
+feat_data = gather(spotify_num[,c(-3, -5,-13,-12)])
+
+ggplot(feat_data, aes(x=value)) + 
+  facet_wrap(~key, 
+             scales = "free", 
+             strip.position='top') + 
+  geom_histogram(bins=25,
+                 aes(color=key, fill=key)) +
+  scale_fill_manual(values=histcolors) + 
+  scale_color_manual(values=histlines) + 
+  theme_bw() +
+  theme(axis.title = element_text(size=12),
+        axis.text = element_text(size=12),
+        legend.position="none", 
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text.x = element_text(size = 10)) + 
+  labs(x = "Values",
+       y = "Counts")
+```
+
+**Danceability** follows an approximately normal distribution.<br />
+The distribution of **energy** is left-skewed, and that of **loudness** is also slightly skewed to the left-skewed because of the presence of outliers. The medians of these two features will be greater than their means.<br />
+The distributions of **speechiness**, **acousticness**, **instrumentalness**, and **liveness** are all skewed to the right in varying degrees. The means of these features will be greater than their medians.<br />
+**Loudness**, **tempo**, and **duration_min** features seem to follow an approximately normal distribution with a very slight skew.
+
+## Correlation between the Numerical Features
+
+```{r, message=FALSE, fig.height=10, fig.width=12}
+cormat = cor(x=spotify_num, y=spotify_num)
+
+melted_cormat = melt(cormat) 
+
+melted_cormat$value = round(melted_cormat$value, digits = 3)
+
+ggplot(data = melted_cormat, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() +
+  theme(axis.text=element_text(size = 12),
+        axis.title=element_text(size = 0),
+        axis.text.x=element_text(angle = 45, hjust=1))+
+  geom_text(aes(Var2, Var1, label = value), color = "white", size = 5)
+```
+
+There is no strong correlation between the attributes. The highest positive correlation is between track duration and instrumentalness, with a correlation coefficient of 0.604. The highest negative correlation is seen between acousticness and energy, with a correlation coefficient of -0.497.
+
+
+## Number of Songs of Each Genre
+
+The song genres included in the data frame are Dark Trap, dnb, Emo, Hardtyle, Hiphop, Pop, Psytrance, Rap, RnB, TechHouse, Tecnho, Trance, Trap, Trap Metal, and Underground Rap.
+
+The following bar plot shows the number of songs in each genre.
+```{r, message=FALSE}
+colors = c('#4a68ca', '#5680cf', '#6297d4', '#6eaed9', '#79c6de', 
+           '#85dee3', '#91f6e8', '#f2ffcd', '#ffe3af', '#ffc69c', 
+           '#ffa787', '#ff8671', '#ff5f57', '#ec414d', '#c33e60')
+
+linecolors = c('#003f9a', '#12599f', '#2371a5', '#348aaa', '#46a3b0', 
+               '#57bbb5', '#79d3ba', '#bae4bc', '#eed3b3', '#e9b19c',
+               '#e38f83', '#dc6969', '#d43c49', '#bf0025', '#93003a')
+
+## Bar Plot for Genre
+genre_bar = plot_ly(data = data.frame(table(spotify$genre)),
+                    x = ~reorder(Var1, -Freq),
+                    y = ~Freq, 
+                    type = 'bar',
+                    text = ~Freq, 
+                    textposition = "auto",
+                    hoverinfo = "text", 
+                    hovertext = paste("Genre:",
+                                      names(table(spotify$genre)),
+                                      "<br>",
+                                      format(table(spotify$genre)/nrow(spotify)*100, 
+                                             digits = 3),"%"),
+                    marker = list(color = colors,
+                                  line = list(color = linecolors, 
+                                              width = 1.5))) %>%
+  layout(title = 'Song Distribution by Genre',
+         xaxis = list(title = list(text = "Genre",
+                                   standoff = 0.5), 
+                      tickangle = -45),
+         yaxis = list(title = "Number of Songs"),
+         margin = list(t = 50))
+
+genre_bar
+```
+
+Underground Rap and Dark Trap seem to dominate the Spotify music catalog, whereas Pop has the lowest number of songs. 
+
+## Distribution of a Select few Features
+In this section, box plots and histograms of five features are examined.
+
+The features chosen for analysis are:<br />
+**Duration (min)**<br />
+**Loudness**<br />
+**Speechiness**<br />
+**Tempo**<br />
+**Valence**<br />
+
+### Track Duration
+
+```{r, message=FALSE}
+boxcolors = c('#003c97', '#204b9f', '#335aa7', '#4269ad', '#5179b1', 
+              '#6089b3', '#6f9aaf', '#84ad86', '#b58a75', '#ba7166', 
+              '#b55a5a', '#ab454d', '#9f3142', '#901d37', '#80002c')
+
+plot_box = function(df)
+{
+  title_name = unlist(strsplit(names(df)[1], split="_"))
+
+  if (length(title_name) == 1){
+    title_name = str_to_title(title_name)
+  } else if (length(title_name) == 2){
+    title_name = str_to_title(paste(title_name[1], 
+                                    title_name[2]))
+  }
+  
+  colnames(df) = c("values", "genre")
+  
+  box_plt = plot_ly(data = df,
+                    y = ~values, 
+                    x= ~genre, 
+                    type = "box", 
+                    color=~genre,
+                    colors = boxcolors) %>%
+    
+    layout(title = paste("Box Plot of", 
+                         title_name, 
+                         "by Genre"),
+           xaxis = list(title = list(text = "Genre",
+                                             standoff = 1), 
+                        tickangle = -45),
+           yaxis = list(title = title_name),
+           margin = list(t = 50, 
+                         b = 25))
+  
+  box_plt
+  
+}
+
+plot_box(spotify[,c("duration_min","genre")])
+```
+
+**Psytrance** has the highest median duration of 7.47 minutes, and **Trap Metal** has the lowest median duration of 2.33 minutes.
+
+**Underground Rap**, the genre with the most songs, has a median duration of 2.81 minutes, and ranges from 2.30 minutes to 3.40 minutes at the 25th and 75th percentiles respectively.
+
+**Pop**, the genre with the least songs, has a median duration of 3.51 minutes, and ranges from 3.15 minutes to 3.83 minutes at the 25th and 75th percentiles respectively.
+
+```{r, message=FALSE}
+
+plot_hist = function(values, title_name)
+{
+  fit = density(values)
+
+  hist = plot_ly(x = values, 
+                 type = "histogram", 
+                 name = "Histogram") %>% 
+    
+    add_trace(x = fit$x, 
+              y = fit$y, 
+              type = "scatter", 
+              mode = "lines", 
+              fill = "tozeroy", 
+              yaxis = "y2",
+              name = "Density") %>% 
+    
+    layout(title = paste("Distribution of", 
+                         title_name),
+           xaxis = list(title = list(text = title_name,
+                                     standoff = 1)),
+           yaxis = list(title = list(text = "Frequency",
+                                     standoff = 0.5)),
+           yaxis2 = list(title=list(text = "Density",
+                                    standoff = 0.5), 
+                         overlaying = "y", 
+                         side = "right"),
+           margin = (list(t = 50, 
+                          b = 50))) %>%
+    
+    layout(shapes = list(type="line",
+                         y0 = 0,
+                         y1 = 1,
+                         yref = "paper",
+                         x0 = median(values),
+                         x1 = median(values),
+                         line = list(color = "#00277c", dash = "dashdot")))
+  
+  hist
+}
+
+plot_hist(spotify$duration_min, "Duration (min)")
+```
+
+The track duration of all the songs irrespective of the genre follows an almost normal distribution with a median value of 3 minutes and 44.76 seconds. The distribution is slightly skewed to the right.
+
+
+### Loudness
+
+Spotify uses a normalization algorithm to adjust track loudness. The values in the column are measured relative to -14 **LUFS** (International Standard) . 
+```{r, message=FALSE}
+plot_box(spotify[,c("loudness","genre")])
+```
+
+**Techno** has the highest negative median loudness of -9.043 LUFS, and **Trap** has the lowest negative median loudness of -2.535 LUFS.
+
+**Underground Rap** has a median loudness of -7.101 LUFS, and ranges from -8.925 LUFS to -5.506 LUFS at the 25th and 75th percentiles respectively.
+
+**Pop** has a median loudness of -5.423 LUFS, and ranges from -6.664 LUFS to -4.240 LUFS at the 25th and 75th percentiles respectively.
+
+```{r, message=FALSE}
+plot_hist(spotify$loudness, "Loudness")
+```
+
+The distribution is almost normally distributed with a median loudness of -6.234 LUFS.  
+
+### Tempo
+```{r, message=FALSE}
+plot_box(spotify[,c("tempo","genre")])
+```
+
+**DnB** has the highest median tempo of 174 BPM, and **Techhouse** has the lowest median tempo of 125 BPM.
+
+**Underground Rap**, the genre with the most songs, has a median loudness of 150 BPM, and ranges from 130 BPM to 174 BPM at the 25th and 75th percentiles respectively.
+
+**Pop**, the genre with the least songs, has a median loudness of 143 BMP, and ranges from 125 BPM to 184 BPM at the 25th and 75th percentiles respectively.
+
+```{r, message=FALSE}
+plot_hist(spotify$tempo, "Tempo")
+```
+
+The distribution of tempo does not follow a normal distribution. There are several peaks and valleys in the density curve.
+
+### Speechiness
+```{r, message=FALSE}
+plot_box(spotify[,c("speechiness","genre")])
+```
+
+**Hiphop** has the highest median speechiness of 0.22, whereas **Psytrance** has the lowest median value of 0.0525. 
+
+**Underground Rap** has a median speechiness of 0.213, and ranges from 0.0935 to 0.324 at the 25th and 75th percentiles respectively.
+
+**Pop** has a median speechiness of 0.0555, and ranges from 0.0405 to 0.0989 at the 25th and 75th percentiles respectively.
+
+```{r, message=FALSE}
+plot_hist(spotify$speechiness, "Speechiness")
+```
+
+The distribution of speechiness is heavily skewed to the right with a median value of 0.0755. 
+
+### Valence
+
+Valence is the measure of musical positivity used by Spotify. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).
+
+```{r, message=FALSE}
+plot_box(spotify[,c("valence","genre")])
+```
+
+**Techhouse** has the highest median valence of 0.591, whereas **Techno** has the lowest median valence of 0.138. 
+
+**Underground Rap** has a median valence of 0.434, and ranges from 0.237 to 0.615 at the 25th and 75th percentiles respectively.
+
+**Pop** has a median valence of 0.549, and ranges from 0.4015 to 0.725 at the 25th and 75th percentiles respectively.
+
+```{r, message=FALSE}
+plot_hist(spotify$valence, "Valence")
+```
+
+There seems to be a general decrease in frequency as the value of valence increases. Median valence of songs in spotify is 0.322.
+
+## Top Five Genres Based on Certain Features
+In this section, the top five genres based on the mean values of certain features are
+discovered.
+
+### Track Duration
+
+Psytrance leads the spotify music data set with the longest songs on average compared to other genres, which is followed by Techno, DnB, Techhouse and Trance. 
+
+```{r, message=FALSE, fig.height=4, fig.width=7}
+plot_top5 = function(df)
+{
+  title_name = unlist(strsplit(names(df)[1], split="_"))
+  
+  if (length(title_name) == 1){
+    title_name = str_to_title(title_name)
+  } else if (length(title_name) == 2){
+    title_name = str_to_title(paste(title_name[1], 
+                                    title_name[2]))
+  }
+  
+  colnames(df) = c("values", "genre")
+  
+  x = df %>% 
+    group_by(genre) %>% 
+    summarise(Mean = mean(values)) %>% 
+    arrange(desc(Mean))
+  
+  cols = colors[match(x$genre[5:1], unique(spotify$genre))]
+  lcols = linecolors[match(x$genre[5:1], unique(spotify$genre))]
+  
+  p = plot_ly(data = data.frame(x[5:1,]),
+              x = ~Mean,
+              type = 'bar',
+              text = paste(x[5:1,]$genre,":",format(x[5:1,]$Mean, digits = 3)),
+              textposition = "auto",
+              hoverinfo = "text",
+              hovertext = paste("Mean",
+                                title_name,
+                                format(x[5:1,]$Mean,
+                                       digits = 3)),
+              marker = list(color = cols,
+                            line = list(color = lcols,
+                                        width = 1.5))) %>%
+    
+    layout(title = paste("Top 5 Genres based on Mean",
+                         title_name),
+           xaxis = list(title = paste("Mean",
+                                      title_name)),
+           yaxis = list(title = "Genre",
+                        ticklabels = x[5:1,]$genre),
+           margin = list(t = 50,
+                         b = 25))
+  
+  p
+}
+
+plot_top5(spotify[,c("duration_min","genre")])
+```
+
+### Loudness 
+
+Trap leads with the loudest songs on average compared to other genres, which is followed by DnB, hardstyle, Emo and Pop 
+
+```{r,message=FALSE, fig.height=4, fig.width=7}
+plot_top5(spotify[,c("loudness","genre")])
+```
+
+### Tempo
+
+DnB has the highest tempo on average compared to other genres, and is followed by Hiphop, RnB, Emo and Underground Rap.  
+
+```{r,message=FALSE, fig.height=4, fig.width=7}
+plot_top5(spotify[,c("tempo","genre")])
+```
+
+### Speechiness
+
+Underground Rap has the highest speechiness on average, followed by Rap, Hiphop, Trap Metal and Trap.
+
+```{r,message=FALSE, fig.height=4, fig.width=7}
+plot_top5(spotify[,c("speechiness","genre")])
+```
+
+### Valence
+
+Techhouse has the highest valence on average which is followed by Pop, hip-hop, RnB and Emo. 
+
+```{r,message=FALSE, fig.height=4, fig.width=7}
+plot_top5(spotify[,c("valence","genre")])
+```
+
+## Frequencies of Mode
+
+Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived. Major is represented by 1 and minor by 0.
+
+The number of songs belonging to the two mode classes is observed for each genre.
+
+```{r, message=FALSE}
+mode_1 = spotify %>% filter(mode == 1)
+mode_0 = spotify %>% filter(mode == 0)
+
+df_mode = data.frame(genre = names(table(mode_1$genre)),
+                     mode1 = as.numeric(table(mode_1$genre)),
+                     mode0 = as.numeric(table(mode_0$genre)))
+
+bar_mode = plot_ly(df_mode,
+                   x = ~genre,
+                   y = ~mode1,
+                   type = "bar",
+                   name = "Mode = 1",
+                   marker = list(color = "#17666d")) %>%
+  add_trace(y = ~mode0,
+            name = "Mode = 0",
+            marker = list(color = "#eb6a26")) %>%
+  layout(xaxis = list(title = list(text = "Genre",
+                                   standoff = 1),
+                      tickangle = -45),
+         yaxis = list(title = list(text = "Frequency",
+                                   standoff = 0.5)),
+         margin = list(t = 15,
+                       b = 25))
+
+bar_mode
+```
+
+The largest difference in the number of songs with a mode of 1 and the number of songs with a mode of 0 is seen in Underground Rap.
+
+## Sampling
+
+Sampling is a technique used to select a representative subset of data points to identify patterns and trends in the larger data set being examined. For analyzing the behavior of the sample data against the population, samples were extracted using different methods. <br />
+**SRSWOR**: In simple random sampling without replacement, 500 samples were selected one by one out of a total of 42,305 data points such that at any stage of the selection, each of the remaining units has the same probability of being selected.<br />
+**Systematic Sampling**: In this sampling method, elements are selected from the population at regular intervals.<br />
+**Stratified Sampling**: It is also known as proportional random sampling. The population is divided into sub-populations called strata. Simple random sampling is performed on these strata to obtain the overall sample which is a better representation of the population.
+
+### Distribution of the Genres in the Samples
+
+In this sub section, the number of songs belonging to each genre is examined for the three sampling methods outlined above.
+
+```{r, message=FALSE}
+## Sampling - Distribution of Groups
+sample_group_plot = function(df, title_name)
+{
+  freq = data.frame(table(df$genre)) %>% 
+    arrange(desc(Freq))
+  cols = c("#02774b", "#5680cf", "#e6a737", "#ec414d")
+  lcols = c("#015335", "#12599f", "#a17527", "#bf0025")
+  
+  col = cols[match(title_name, c("Population", 
+                                 "SRSWOR", 
+                                 "Systematic",
+                                 "Stratified"))]
+  lcol= lcols[match(title_name, c("Population", 
+                                  "SRSWOR", 
+                                  "Systematic",
+                                  "Stratified"))]
+  
+  sample_plot = plot_ly(freq,
+                        x = ~reorder(Var1, -Freq),
+                        y = ~Freq,
+                        type = "bar",
+                        name = title_name,
+                        hoverinfo = "text",
+                        hovertext = paste0("Genre: ",
+                                           freq$Var1,
+                                           "<br>",
+                                           format(100*freq$Freq/sum(freq$Freq), 
+                                                  digits = 3),
+                                           "%",
+                                           "<br>",
+                                           freq$Freq,
+                                           " out of ",
+                                           sum(freq$Freq)),
+                        showlegend=T,
+                        marker = list(color = col,
+                                      line = list(color = lcol,
+                                                  width = 1.5))) %>%
+    layout(title = title_name,
+           xaxis = list(title = list(text = "Genre",
+                                     standoff = 0.5), 
+                        tickangle = -45),
+           yaxis = list(title = "Count"),
+           margin = list(t = 50))
+  
+  return (sample_plot)
+}
+
+sample.size = 1000
+
+N = nrow(spotify)
+
+spotify_shuffled = spotify[sample(nrow(spotify)),]
+
+# Population
+h1 = sample_group_plot(spotify, "Population")
+
+# SRSWOR
+s = srswor(sample.size, N)
+sample.df = spotify_shuffled[s!=0,]
+
+h2 = sample_group_plot(sample.df, "SRSWOR")
+
+# Systematic Sampling
+k = ceiling(N/sample.size)
+r = sample(k,1)
+s = seq(r, by=k, length=sample.size)
+
+sample.df = spotify_shuffled[s,]
+
+h3 = sample_group_plot(sample.df, "Systematic")
+
+# Stratified Sampling
+df = spotify[order(spotify$genre),]
+st.sizes = ceiling(sample.size * table(df$genre)/sum(table(df$genre)))
+
+st.data = strata(df, 
+                 stratanames=c("genre"), 
+                 size=st.sizes, 
+                 method="srswor", 
+                 description=F)
+
+sample.df = getdata(df, st.data)
+
+h4 = sample_group_plot(sample.df, "Stratified")
+
+subplot(
+  h1, 
+  h2, 
+  h3, 
+  h4, 
+  nrows=2, 
+  shareX=F, 
+  shareY=F,
+  margin = 0.075
+) %>%
+  layout(title = "Frequencies of the Genres",
+         margin = list(t = 50,
+                       b = 15))
+```
+
+### Distribution of the Track Duration in the Samples
+
+In this sub section, the distribution of the track duration in minutes is examined for the different sampling methods. 500 samples were drawn, each with a sample size of 100 for the analysis.
+
+```{r, message=FALSE}
+samples = 500
+sample.size = 100
+
+N = nrow(spotify)
+
+xbar = numeric(samples)
+
+sample.means = numeric(4)
+sample.sd = numeric(4)
+
+# Simple Random Sampling without Replacement
+for (i in 1:samples){
+  s = srswor(sample.size, N)
+  xbar[i] = mean(spotify[s!=0,]$duration_min)
+}
+
+sample.means[1] = mean(xbar, na.rm=T)
+sample.sd[1] = sd(xbar, na.rm=T)
+
+h1 = plot_ly(x=xbar, 
+             type='histogram',
+             histnorm='probability',
+             nbinsx=20,
+             name='SRSWOR') %>%
+  layout(xaxis = list(title = "Duration (min)",
+                      showgrid = T),
+         yaxis = list(title = "Density",
+                      showgrid = T,
+                      range=c(0,0.25)))
+
+# Systematic Sampling
+for (i in 1:samples){
+  k = ceiling(N/sample.size)
+  r = sample(k,1)
+  s = seq(r, by=k, length=sample.size)
+  xbar[i] = mean(spotify[s,]$duration_min)
+}
+
+sample.means[2] = mean(xbar, na.rm=T)
+sample.sd[2] = sd(xbar, na.rm=T)
+
+h2 = plot_ly(x=xbar, 
+             type='histogram',
+             histnorm='probability',
+             nbinsx=20,
+             name='Systematic') %>%
+  layout(xaxis = list(title = "Duration (min)",
+                      showgrid = T),
+         yaxis = list(title = "Density",
+                      showgrid = T,
+                      range=c(0,0.25)))
+
+# Systematic Sampling with Unequal Probability
+for (i in 1:samples){
+  pik = inclusionprobabilities(spotify$duration_min, sample.size)
+  s = UPsystematic(pik)
+  xbar[i] = mean(spotify[s!=0,]$duration_min)
+}
+
+sample.means[3] = mean(xbar, na.rm=T)
+sample.sd[3] = sd(xbar, na.rm=T)
+
+h3 = plot_ly(x=xbar, 
+             type='histogram',
+             histnorm='probability',
+             nbinsx=20, 
+             name='Systematic - Unequal') %>%
+  layout(xaxis = list(title = "Duration (min)",
+                      showgrid = T),
+         yaxis = list(title = "Density",
+                      showgrid = T,
+                      range=c(0,0.25)))
+
+# Stratified Sampling
+df = spotify[order(spotify$genre),]
+st.sizes = ceiling(sample.size * table(df$genre)/sum(table(df$genre)))
+for (i in 1:samples){
+  st.data = strata(df, 
+                   stratanames=c("genre"), 
+                   size=st.sizes, 
+                   method="srswor", 
+                   description=F)
+  xbar[i] = mean(getdata(df, st.data)$duration_min)
+}
+
+sample.means[4] = mean(xbar, na.rm=T)
+sample.sd[4] = sd(xbar, na.rm=T)
+
+h4 = plot_ly(x=xbar, 
+             type='histogram',
+             histnorm='probability',
+             nbinsx=20, 
+             name='Stratified') %>%
+  layout(xaxis = list(title = "Duration (min) Sample Mean",
+                      showgrid = T),
+         yaxis = list(title = "Density",
+                      showgrid = T,
+                      range=c(0,0.25)))
+
+cat(paste(c("Population:\n",
+            "\nSRSWOR:\n", 
+            "\nSystematic:\n", 
+            "\nSystematic - Unequal:\n", 
+            "\nStratified:\n"),
+            "\tMean =",
+            format(c(mean(spotify$duration_min), sample.means), digits=3),
+            "and SD =",
+            format(c(sd(spotify$duration_min), sample.sd), digits=3)))
+
+subplot(
+  h1, 
+  h2, 
+  h3, 
+  h4, 
+  nrows=2, 
+  shareX=T, 
+  shareY=T,
+  titleX=T,
+  titleY=T,
+  margin = 0.075
+) %>%
+  layout(title = "Distribution of Duration (min) Sample Means",
+         margin = list(t = 50,
+                       b = 15))
+```
+
+## Central Limit Theorem
+
+The central limit theorem states that the distribution of sample means taken from independent random samples follows a normal distribution even if the original population is not normally distributed.
+As the sample size increases, the distribution of the sample means becomes closer to a normal distribution. The validity of the central limit theorem is tested for the track durations in minutes. The figure below shows the distributions of 5000 random samples of sample sizes of 10, 20, 30, and 50.<br />
+In the [Feature Distribution](#feat_dist) section, it was observed that the track duration has a skewed distribution but the distribution of the sample means becomes closer to a normal distribution as the sample size increases. The mean of the sample distribution is equal to the population mean.
+
+```{r, message=FALSE}
+## Central Limit Theorem for Duration (min)
+central_limit_func = function(values, samples, sample.size)
+{
+  xbar = numeric(samples)
+  
+  for (i in 1:samples)
+  {
+    xbar[i] = mean(sample(values,
+                          size=sample.size,
+                          replace=TRUE))
+  }
+  
+  print(paste("Sample size =",
+              sample.size,
+              ": Mean =",
+              format(mean(xbar), digits=3),
+              "and SD =",
+              format(sd(xbar), digits=3)))
+  
+  return (xbar)
+}
+
+central_limit_plots = function(values, samples, sample.sizes, title_name)
+{
+  values.mean = mean(values)
+  values.sd = sd(values)
+  
+  print(paste("Population Mean =",
+              format(mean(spotify$duration_min), digits = 3),
+              "and Population SD =",
+              format(sd(spotify$duration_min), digits = 3)))
+  
+  subplot(
+    plot_ly(x=(central_limit_func(values, 
+                                  samples, 
+                                  sample.sizes[1])),
+            type = 'histogram',
+            histnorm="probability",
+            nbinsx=25,
+            name = paste('Sample Size =', 
+                         sample.sizes[1])) %>%
+      layout(xaxis = list(title = title_name,
+                          range = c(2,6)),
+             yaxis = list(title = "Density",
+                          range = c(0,0.25))),
+    
+    plot_ly(x = (central_limit_func(values, 
+                                    samples, 
+                                    sample.sizes[2])),
+            type = 'histogram',
+            histnorm="probability",
+            nbinsx=25,
+            name = paste('Sample Size =', 
+                         sample.sizes[2])) %>%
+      layout(xaxis = list(title = title_name,
+                          range = c(2,6)),
+             yaxis = list(title = "Density",
+                          range = c(0,0.25))),
+    
+    plot_ly(x = (central_limit_func(values, 
+                                    samples, 
+                                    sample.sizes[3])),
+            type = 'histogram',
+            histnorm="probability",
+            nbinsx=25,
+            name = paste('Sample Size =', 
+                         sample.sizes[3])) %>%
+      layout(xaxis = list(title = title_name,
+                          range = c(2,6),
+                          showgrid=T),
+             yaxis = list(title = "Density",
+                          range = c(0,0.25))),
+    
+    plot_ly(x = (central_limit_func(values, 
+                                    samples, 
+                                    sample.sizes[4])),
+            type = 'histogram',
+            histnorm="probability",
+            nbinsx=25,
+            name = paste('Sample Size =', 
+                         sample.sizes[4])) %>%
+      layout(xaxis = list(title = title_name,
+                          range = c(2,6),
+                          showgrid=T),
+             yaxis = list(title = "Density",
+                          range = c(0,0.25))),
+    
+    nrows = 2,
+    shareY = T,
+    shareX = T,
+    titleY = T,
+    titleX = T,
+    margin = 0.07
+  ) %>%
+    layout(title = paste("Distribution of",
+                         title_name,
+                         "Samples"),
+           font = list(size = 10),
+           margin = list(t = 50,
+                         b = 15))
+}
+
+central_limit_plots(spotify$duration_min, 
+                    5000, 
+                    c(10,20,30,50), 
+                    "Duration (min) Sample Mean")
+```
+
+## Conclusion
+
+Even though this is not the complete data set of songs on Spotify, some key insights about the genres were observed.
+
+1. There is no strong positive or negative correlation between the features.
+2. Pop has the least number of songs out of all the genres, whereas underground rap has the most. 
+3. With the exception of loudness, none of the features follows a normal distribution. 
+4. Psytrance has the longest songs, and trap has the loudest. 
+5. Underground Rap has the highest speechiness, and tech house has the most valence.
+6. DnB has the fastest songs in BPM.
